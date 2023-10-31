@@ -1,4 +1,4 @@
-# DCS - Server de Comunicare Deschisă
+# DCS
 
 ## Introducere
 
