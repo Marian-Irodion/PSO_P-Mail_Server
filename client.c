@@ -10,6 +10,9 @@
 void login(int socket_desc) {
     char username[100], password[100];
     char server_message[200];
+    char trash[2];
+    fgets(trash, sizeof(trash), stdin);
+
     printf("Enter username: ");
     fgets(username, sizeof(username), stdin);
     //username[strcspn(username, "\n")] = '\0'; // Elimină newline-ul de la sfârșit
@@ -70,31 +73,127 @@ void sendMessage(int socket_desc) {
     }
 }
 
+void readSentMessage(int socket_desc) {
+    char server_message[200];
+
+    // Primire răspuns de la server
+    char server_response;
+    while(1) {
+        recv(socket_desc, &server_response, sizeof(server_response), 0);
+        if(server_response == '^') {
+            return;
+        }
+        printf("%c", server_response);
+    }
+}
+
+void readReceivedMessage(int socket_desc) {}
+
+void deleteMessage(int socket_desc) {}
+
+void createAcc(int socket_desc) {
+    char username[100], password[100];
+    char server_message[200];
+    char trash[2];
+    fgets(trash, sizeof(trash), stdin);
+
+    printf("Enter username: ");
+    fgets(username, sizeof(username), stdin);
+    username[strcspn(username, "\n")] = '\0'; // Elimină newline-ul de la sfârșit
+
+    printf("Enter password: ");
+    fgets(password, sizeof(password), stdin);
+    password[strcspn(password, "\n")] = '\0'; // Elimină newline-ul de la sfârșit
+
+    // Concatenare username și parolă într-un singur mesaj de trimis la server
+    snprintf(server_message, sizeof(server_message), "%s\n%s", username, password);
+
+    // Trimitere mesaj la server
+    if (send(socket_desc, server_message, strlen(server_message), 0) < 0) {
+        printf("Unable to send message\n");
+        return;
+    }
+
+    // Primire răspuns de la server
+    char server_response[200];
+    if (recv(socket_desc, server_response, sizeof(server_response), 0) < 0) {
+        printf("Unable to receive message\n");
+        return;
+    }
+
+    if(strstr(server_response, "User created") == NULL) {
+        createAcc(socket_desc);
+    }
+}
+
 void menu(int socket_desc) {
+    char mode[100];
     char option;
     printf("1. Send message\n");
-    printf("2. Read message\n");
-    printf("3. Delete message\n");
-    printf("4. Exit\n");
+    printf("2. Read sent message\n");
+    printf("3. Read received message\n");
+    printf("4. Delete message\n");
+    printf("5. Exit\n");
     printf("Choose an option: ");
     option=getchar();
     switch (option) {
         case '1':
             fflush(stdin);
+            snprintf(mode, sizeof(mode), "%s", "ss\0");
+            send(socket_desc, mode, strlen(mode), 0);
             sendMessage(socket_desc);
             break;
         case '2':
             fflush(stdin);
-            //readMessage(socket_desc);
+            snprintf(mode, sizeof(mode), "%s", "sm\0");
+            send(socket_desc, mode, strlen(mode), 0);
+            readSentMessage(socket_desc);
             break;
         case '3':
             fflush(stdin);
-            //deleteMessage(socket_desc);
+            snprintf(mode, sizeof(mode), "%s", "rm\0");
+            send(socket_desc, mode, strlen(mode), 0);
+            readReceivedMessage(socket_desc);
             break;
         case '4':
             fflush(stdin);
-            exit(0);
+            snprintf(mode, sizeof(mode), "%s", "dm\0");
+            send(socket_desc, mode, strlen(mode), 0);
+            deleteMessage(socket_desc);
             break;
+        case '5':
+            fflush(stdin);
+            exit(0);
+        default:
+            printf("Invalid option\n");
+            break;
+    }
+}
+
+void antemenu(int socket_desc) {
+    char option;
+    char mode[100];
+    printf("1. Login\n");
+    printf("2. Register\n");
+    printf("3. Exit\n");
+    printf("Choose an option: ");
+    option=getchar();
+    switch (option) {
+        case '1':
+            fflush(stdin);
+            snprintf(mode, sizeof(mode), "%s", "lg\0");
+            send(socket_desc, mode, strlen(mode), 0);
+            login(socket_desc);
+            break;
+        case '2':
+            fflush(stdin);
+            snprintf(mode, sizeof(mode), "%s", "rg\0");
+            send(socket_desc, mode, strlen(mode), 0);
+            createAcc(socket_desc);
+            break;
+        case '3':
+            fflush(stdin);
+            exit(0);
         default:
             printf("Invalid option\n");
             break;
@@ -129,10 +228,10 @@ int main(void) {
 
     //menu(socket_desc);
     system("clear");
-    printf("-----------------------------------------------------------\n\n\n");
-    printf("\t\t\tBine ai venit in aplicatia noastra de mai!\n\n\n");
-    printf("-----------------------------------------------------------\n\n\n");
-    login(socket_desc);
+    printf("-------------------------------------------------------------------------\n\n\n");
+    printf("\t\t\tBine ai venit in aplicatia noastra de mail!\n\n\n");
+    printf("-------------------------------------------------------------------------\n\n\n");
+    antemenu(socket_desc);
     system("clear");
     menu(socket_desc);
 
