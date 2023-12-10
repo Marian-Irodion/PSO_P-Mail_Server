@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <time.h>
 
 #define PORT 55555
 #define MAX_MESSAGE_SIZE 1024
@@ -87,7 +88,7 @@ int checkCredentias(char *username, char *password) {
     while (1) {
         start:
         bytesRead = read(fd, &character, 1);
-        if(bytesRead < 0) {
+        if(bytesRead <= 0) {
             return 0;
         }
         if (character == '\n') {
@@ -102,6 +103,9 @@ int checkCredentias(char *username, char *password) {
     }
     user = strtok(buffer, " ");
     pass = strtok(NULL, "\n");
+    if(user == NULL || pass == NULL) {
+        return 0;
+    }
     if (strcmp(user, username) == 0 && strcmp(pass, password) == 0)
         return 1;
     goto start;
@@ -202,10 +206,68 @@ void handle_message(struct Message **messages, int client_socket) {
     //close(client_socket);
 }
 
+void readSentMessage(struct Message *messages, int socket_desc) {
+    for(int i=0; i<indexCount; i++) {
+        if(strcmp(globalUser, messages[i].sender) == 0) {
+            char buffer[4096];
+            snprintf(buffer, sizeof(buffer), "Catre: %s cu titlul: %s\nContinut: %s\n", messages[i].recipient, messages[i].title, messages[i].message);
+            send(socket_desc, buffer, strlen(buffer), 0);
+        }
+    }
+    //incheiere trimitere
+    send(socket_desc, "^", strlen("^"), 0);
+}
+
+void readReceivedMessage(int socket_desc) {}
+void deleteMessage(int socket_desc) {}
+void handle_createAccount(int socket_desc) {
+    char buffer[MAX_MESSAGE_SIZE];
+    int credentials_len;
+
+    while (1) {
+        credentials_len = recv(socket_desc, buffer, MAX_MESSAGE_SIZE, 0);
+
+        if (credentials_len <= 0) {
+            printf("Client disconnected.\n");
+            break;
+        }
+
+        buffer[credentials_len] = '\0'; // Adaugă terminatorul null pentru a trata datele primite ca șir
+
+        // Separă mesajul în destinatar, titlu și conținut
+        char *username = strtok(buffer, "\n");
+        char *password = strtok(NULL, "\0");
+
+        if (username != NULL && password != NULL) {
+            printf("Received message:\nUsername: %s\nParola: %s\n", username, password);
+            if (checkCredentias(username, password) == 1) {
+                printf("User already exists\n");
+                send(socket_desc, "User already exists", strlen("User already exists"), 0);
+            } else {
+                printf("User created\n");
+                send(socket_desc, "User created", strlen("User created"), 0);
+                int fd = open("credentials", O_RDWR | O_APPEND, 0644);
+                char buffer[1024];
+                snprintf(buffer, sizeof(buffer), "\n%s %s", username, password);
+                write(fd, buffer, strlen(buffer));
+                close(fd);
+                strcpy(globalUser, username);
+                printf("\nUser connected: %s\n", globalUser);
+                break;
+            }
+        } else {
+            printf("Invalid message format.\n");
+        }
+    }
+
+    //close(client_socket);
+}
+
 int main() {
     int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr;
     socklen_t addr_len = sizeof(struct sockaddr);
+    srand(time(NULL));
 
     // Creare socket
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -234,13 +296,31 @@ int main() {
         printf("New connection accepted\n");
 
         // Manipulare client
-        handle_client(client_socket);
-        handle_message(&messages, client_socket);
-        saveMessages(messages);
-    }
+        char mode[100];
+        recv(client_socket, mode, 100, 0);
+        if(strcmp(mode, "lg") == 0) {
+            handle_client(client_socket);
+        } else if (strcmp(mode, "rg") == 0) {
+            handle_createAccount(client_socket);
+        } else {
+            printf("Client disconnected.\n");
+        }
 
+        recv(client_socket, mode, 100, 0);
+        if(strcmp(mode, "ss")==0) {
+            handle_message(&messages, client_socket);
+        } else if (strcmp(mode, "sm")==0) {
+            readSentMessage(messages, client_socket);
+        } else if (strcmp(mode, "rm")==0) {
+            readReceivedMessage(client_socket);
+        } else if (strcmp(mode, "dm")==0) {
+            deleteMessage(client_socket);
+        } else {
+            printf("Client disconnected.\n");
+        }
 
+    saveMessages(messages);
+}
     close(server_socket);
-
     return 0;
 }
