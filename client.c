@@ -74,8 +74,6 @@ void sendMessage(int socket_desc) {
 }
 
 void readSentMessage(int socket_desc) {
-    char server_message[200];
-
     // Primire răspuns de la server
     char server_response;
     while(1) {
@@ -87,9 +85,33 @@ void readSentMessage(int socket_desc) {
     }
 }
 
-void readReceivedMessage(int socket_desc) {}
+void readReceivedMessage(int socket_desc) {
+    // Primire răspuns de la server
+    char server_response;
+    while(1) {
+        recv(socket_desc, &server_response, sizeof(server_response), 0);
+        if(server_response == '^') {
+            return;
+        }
+        printf("%c", server_response);
+    }
+}
 
-void deleteMessage(int socket_desc) {}
+void deleteMessage(int socket_desc) {
+    char server_message[200];
+    char trash[2];
+    fgets(trash, sizeof(trash), stdin);
+
+    printf("Enter message ID: ");
+    fgets(server_message, sizeof(server_message), stdin);
+    server_message[strcspn(server_message, "\n")] = '\0'; // Elimină newline-ul de la sfârșit
+
+    // Trimitere mesaj la server
+    if (send(socket_desc, server_message, strlen(server_message), 0) < 0) {
+        printf("Unable to send message\n");
+        return;
+    }
+}
 
 void createAcc(int socket_desc) {
     char username[100], password[100];
@@ -127,6 +149,7 @@ void createAcc(int socket_desc) {
 }
 
 void menu(int socket_desc) {
+    start:
     char mode[100];
     char option;
     printf("1. Send message\n");
@@ -141,25 +164,38 @@ void menu(int socket_desc) {
             fflush(stdin);
             snprintf(mode, sizeof(mode), "%s", "ss\0");
             send(socket_desc, mode, strlen(mode), 0);
+            system("clear");
             sendMessage(socket_desc);
+            system("clear");
             break;
         case '2':
             fflush(stdin);
             snprintf(mode, sizeof(mode), "%s", "sm\0");
             send(socket_desc, mode, strlen(mode), 0);
+            system("clear");
             readSentMessage(socket_desc);
+            printf("\n---------------------\n");
+            printf("\n---------------------\n");
+            printf("\n---------------------\n\n");
             break;
         case '3':
             fflush(stdin);
             snprintf(mode, sizeof(mode), "%s", "rm\0");
             send(socket_desc, mode, strlen(mode), 0);
+            system("clear");
             readReceivedMessage(socket_desc);
+            printf("\n---------------------\n");
+            printf("\n---------------------\n");
+            printf("\n---------------------\n\n");
             break;
         case '4':
             fflush(stdin);
             snprintf(mode, sizeof(mode), "%s", "dm\0");
             send(socket_desc, mode, strlen(mode), 0);
             deleteMessage(socket_desc);
+            printf("\n---------------------\n");
+            printf("\n---------------------\n");
+            printf("\n---------------------\n\n");
             break;
         case '5':
             fflush(stdin);
@@ -183,12 +219,14 @@ void antemenu(int socket_desc) {
             fflush(stdin);
             snprintf(mode, sizeof(mode), "%s", "lg\0");
             send(socket_desc, mode, strlen(mode), 0);
+            system("clear");
             login(socket_desc);
             break;
         case '2':
             fflush(stdin);
             snprintf(mode, sizeof(mode), "%s", "rg\0");
             send(socket_desc, mode, strlen(mode), 0);
+            system("clear");
             createAcc(socket_desc);
             break;
         case '3':
@@ -233,7 +271,8 @@ int main(void) {
     printf("-------------------------------------------------------------------------\n\n\n");
     antemenu(socket_desc);
     system("clear");
-    menu(socket_desc);
+    while(1)
+        menu(socket_desc);
 
     return 0;
 }
