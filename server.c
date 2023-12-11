@@ -12,6 +12,81 @@
 int indexCount = 0;
 char globalUser[100];
 
+// Structura unui nod din lista de vizibilitate a utilizatorilor
+struct Node {
+    char username[100];
+    struct Node* next;
+};
+
+// Structura listei de vizibilitate a utilizatorilor
+struct visibilityUsers {
+    struct Node* head;
+};
+
+// Funcție pentru a inițializa o listă nouă de vizibilitate a utilizatorilor
+struct visibilityUsers* createVisibilityUsers() {
+    struct visibilityUsers* list = (struct visibilityUsers*)malloc(sizeof(struct visibilityUsers));
+    list->head = NULL;
+    return list;
+}
+
+// Funcție pentru a adăuga un utilizator în lista de vizibilitate a utilizatorilor
+void addUser(struct visibilityUsers* list, const char* username) {
+    struct Node* newNode = (struct Node*)malloc(sizeof(struct Node));
+    strncpy(newNode->username, username, sizeof(newNode->username) - 1);
+    newNode->username[sizeof(newNode->username) - 1] = '\0';
+    newNode->next = list->head;
+    list->head = newNode;
+}
+
+// Funcție pentru a obține toate string-urile din lista de vizibilitate
+char* getAllVisibilityUsers(struct visibilityUsers *list) {
+    struct Node *current = list->head;
+    char *result = malloc(sizeof(char) * 100); // dimensiunea este exemplificativă
+    memset(result, '\0', sizeof(result));
+
+    while (current != NULL) {
+        strcat(result, current->username);
+        strcat(result, " ");
+        current = current->next;
+    }
+    result[strlen(result)-1] = '\n'; // Elimină ultimul spațiu din șirul rezultat
+    return result;
+}
+
+// Funcție pentru a șterge un utilizator din lista de vizibilitate a utilizatorilor
+void removeUser(struct visibilityUsers* list, const char* username) {
+    struct Node* current = list->head;
+    struct Node* prev = NULL;
+
+    while (current != NULL) {
+        if (strcmp(current->username, username) == 0) {
+            if (prev == NULL) {
+                list->head = current->next;
+            } else {
+                prev->next = current->next;
+            }
+            free(current);
+            return;
+        }
+        prev = current;
+        current = current->next;
+    }
+}
+
+// Funcție pentru a elibera memoria ocupată de lista de vizibilitate a utilizatorilor
+void freeVisibilityUsers(struct visibilityUsers* list) {
+    struct Node* current = list->head;
+    struct Node* temp;
+
+    while (current != NULL) {
+        temp = current->next;
+        free(current);
+        current = temp;
+    }
+    free(list);
+}
+
 //o structura care sa retina username-ul celui care a trimis mesajul, username-ul destinatarului, titlul si mesajul
 struct Message {
     char ID[100];
@@ -19,7 +94,9 @@ struct Message {
     char recipient[100];
     char title[100];
     char message[100];
+    struct visibilityUsers* visibilityList;
 };
+
 
 struct Message *loadMessages() {
     int fd = open("messages", O_RDONLY);
@@ -49,15 +126,20 @@ struct Message *loadMessages() {
     char *sender = strtok(NULL, " ");
     char *recipient = strtok(NULL, " ");
     char *title = strtok(NULL, "\n");
+    char *firstUser = strtok(NULL, " ");
+    char *secondUser = strtok(NULL, "\n");
     char *message = strtok(NULL, "^");
     strcpy(messages[indexCount].ID, ID);
     strcpy(messages[indexCount].sender, sender);
     strcpy(messages[indexCount].recipient, recipient);
     strcpy(messages[indexCount].title, title);
     strcpy(messages[indexCount].message, message);
+    messages[indexCount].visibilityList = createVisibilityUsers();
+    addUser(messages[indexCount].visibilityList, firstUser);
+    addUser(messages[indexCount].visibilityList, secondUser);
     indexCount++;
     messages = realloc(messages, (indexCount + 1) * sizeof(struct Message));
-    goto start; 
+    goto start;
 
     return messages;
 }
@@ -67,7 +149,9 @@ void saveMessages(struct Message *messages) {
     int fd = open("messages", O_RDWR | O_CREAT | O_TRUNC, 0644);
     for(int i=0; i<indexCount; i++) {
         char buffer[8192];
-        snprintf(buffer, sizeof(buffer), "%s %s %s %s\n%s^\n", messages[i].ID, messages[i].sender, messages[i].recipient, messages[i].title, messages[i].message);
+        char* allVisibileUsers = getAllVisibilityUsers(messages[i].visibilityList);
+        printf("allVisibileUsers: %s\n", allVisibileUsers);
+        snprintf(buffer, sizeof(buffer), "%s %s %s %s\n%s%s^\n", messages[i].ID, messages[i].sender, messages[i].recipient, messages[i].title, allVisibileUsers, messages[i].message);
         write(fd, buffer, strlen(buffer));
     }
     close(fd);
@@ -169,6 +253,9 @@ void addMessage(struct Message **messages, char *sender, char *recipient, char *
     strcpy((*messages)[indexCount].recipient, recipient);
     strcpy((*messages)[indexCount].title, title);
     strcpy((*messages)[indexCount].message, message);
+    (*messages)[indexCount].visibilityList = createVisibilityUsers();
+    addUser((*messages)[indexCount].visibilityList, sender);
+    addUser((*messages)[indexCount].visibilityList, recipient);
     indexCount++;
     *messages = realloc(*messages, (indexCount + 1) * sizeof(struct Message));
 }
@@ -207,19 +294,79 @@ void handle_message(struct Message **messages, int client_socket) {
 }
 
 void readSentMessage(struct Message *messages, int socket_desc) {
-    for(int i=0; i<indexCount; i++) {
-        if(strcmp(globalUser, messages[i].sender) == 0) {
-            char buffer[4096];
-            snprintf(buffer, sizeof(buffer), "Catre: %s cu titlul: %s\nContinut: %s\n", messages[i].recipient, messages[i].title, messages[i].message);
-            send(socket_desc, buffer, strlen(buffer), 0);
+    for (int i = 0; i < indexCount; i++) {
+        struct Node *current = messages[i].visibilityList->head;
+        while (current != NULL) {
+            if (strcmp(globalUser, current->username) == 0 && strcmp(globalUser, messages[i].sender) == 0) {
+                char buffer[4096];
+                snprintf(buffer, sizeof(buffer), "ID: %s\nCatre: %s\nTitlul: %s\nContinut: %s\n\n", messages[i].ID, messages[i].recipient, messages[i].title, messages[i].message);
+                send(socket_desc, buffer, strlen(buffer), 0);
+                break; // În momentul în care găsim utilizatorul în lista de vizibilitate, trimitem mesajul și ieșim din buclă
+            }
+            current = current->next;
         }
     }
-    //incheiere trimitere
+    // Încheiere trimitere
     send(socket_desc, "^", strlen("^"), 0);
 }
 
-void readReceivedMessage(int socket_desc) {}
-void deleteMessage(int socket_desc) {}
+void readReceivedMessage(struct Message *messages, int socket_desc) {
+    for (int i = 0; i < indexCount; i++) {
+        struct Node *current = messages[i].visibilityList->head;
+        while (current != NULL) {
+            if (strcmp(globalUser, current->username) == 0 && strcmp(globalUser, messages[i].recipient) == 0) {
+                char buffer[4096];
+                snprintf(buffer, sizeof(buffer), "ID: %s\nDe la: %s\nTitlul: %s\nContinut: %s\n\n", messages[i].ID, messages[i].sender, messages[i].title, messages[i].message);
+                send(socket_desc, buffer, strlen(buffer), 0);
+                break; // Ieșire din buclă când utilizatorul este găsit în lista de vizibilitate
+            }
+            current = current->next;
+        }
+    }
+    // Încheiere trimitere
+    send(socket_desc, "^", strlen("^"), 0);
+}
+
+void deleteMessage(struct Message **messages, int socket_desc) {
+    //in aceasta functie trebuie sa stergi mesajul cu ID-ul primit de la client
+    //in lista visibilityUsers a mesajului cu ID-ul primit de la client trebuie ca username-ul clientului sa fie inlocuit cu string-ul "null"
+    //dupa asta, daca in lista visibilityUsers a mesajului cu ID-ul primit de la client nu mai exista niciun username diferit de "null", atunci mesajul trebuie sters din structura messages
+    //si sa folosesti doar file descriptors si apeluri de sistem
+    char server_message[200];
+    char ID[100];
+    recv(socket_desc, ID, 100, 0);
+    printf("ID primit: %s\n", ID);
+    ID[13]='\0';
+    for(int i=0; i<indexCount; i++) {
+        if(strcmp(ID, (*messages)[i].ID) == 0) {
+            struct Node *current = (*messages)[i].visibilityList->head;
+            while(current != NULL) {
+                if(strcmp(current->username, globalUser) == 0) {
+                    strcpy(current->username, "null");
+                }
+                current = current->next;
+            }
+
+            struct Node *aux = (*messages)[i].visibilityList->head;
+            while(aux != NULL) {
+                if(strcmp(aux->username, "null") != 0) {
+                    return;
+                }
+                aux = aux->next;
+            }
+
+            if(aux == NULL) {
+                for(int j=i; j<indexCount-1; j++) {
+                    messages[j] = messages[j+1];
+                }
+                indexCount--;
+                messages = realloc(messages, (indexCount + 1) * sizeof(struct Message));
+            }
+            break;
+        }
+    }
+}
+
 void handle_createAccount(int socket_desc) {
     char buffer[MAX_MESSAGE_SIZE];
     int credentials_len;
@@ -312,9 +459,9 @@ int main() {
         } else if (strcmp(mode, "sm")==0) {
             readSentMessage(messages, client_socket);
         } else if (strcmp(mode, "rm")==0) {
-            readReceivedMessage(client_socket);
+            readReceivedMessage(messages, client_socket);
         } else if (strcmp(mode, "dm")==0) {
-            deleteMessage(client_socket);
+            deleteMessage(&messages, client_socket);
         } else {
             printf("Client disconnected.\n");
         }
