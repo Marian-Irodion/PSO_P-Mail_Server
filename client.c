@@ -149,7 +149,6 @@ void createAcc(int socket_desc) {
 }
 
 void menu(int socket_desc) {
-    start:
     char mode[100];
     char option;
     printf("1. Send message\n");
@@ -159,6 +158,9 @@ void menu(int socket_desc) {
     printf("5. Exit\n");
     printf("Choose an option: ");
     option=getchar();
+    while (option == '\n' || option == EOF) {
+        option=getchar();
+    }
     switch (option) {
         case '1':
             fflush(stdin);
@@ -199,6 +201,8 @@ void menu(int socket_desc) {
             break;
         case '5':
             fflush(stdin);
+            snprintf(mode, sizeof(mode), "%s", "ex\0");
+            send(socket_desc, mode, strlen(mode), 0);
             exit(0);
         default:
             printf("Invalid option\n");
