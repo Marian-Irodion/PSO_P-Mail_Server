@@ -150,7 +150,6 @@ void saveMessages(struct Message *messages) {
     for(int i=0; i<indexCount; i++) {
         char buffer[8192];
         char* allVisibileUsers = getAllVisibilityUsers(messages[i].visibilityList);
-        printf("allVisibileUsers: %s\n", allVisibileUsers);
         snprintf(buffer, sizeof(buffer), "%s %s %s %s\n%s%s^\n", messages[i].ID, messages[i].sender, messages[i].recipient, messages[i].title, allVisibileUsers, messages[i].message);
         write(fd, buffer, strlen(buffer));
     }
@@ -435,25 +434,29 @@ int main() {
     printf("Server listening on port %d...\n", PORT);
     struct Message *messages = loadMessages();
 
+    // Acceptare conexiune
+    retry:
+
+    client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &addr_len);
+
+    printf("New connection accepted\n");
+
+    // Manipulare client
+    char mode[100];
+    recv(client_socket, mode, 100, 0);
+    if(strcmp(mode, "lg") == 0) {
+        handle_client(client_socket);
+    } else if (strcmp(mode, "rg") == 0) {
+        handle_createAccount(client_socket);
+    } else {
+        printf("Client disconnected.\n");
+    }
+    int counter_while = 0;
+
     while (1) {
-        // Acceptare conexiune
-
-        client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &addr_len);
-
-        printf("New connection accepted\n");
-
-        // Manipulare client
-        char mode[100];
+        printf("Intrarea: %d\n", counter_while++);
         recv(client_socket, mode, 100, 0);
-        if(strcmp(mode, "lg") == 0) {
-            handle_client(client_socket);
-        } else if (strcmp(mode, "rg") == 0) {
-            handle_createAccount(client_socket);
-        } else {
-            printf("Client disconnected.\n");
-        }
-
-        recv(client_socket, mode, 100, 0);
+        printf("Mode: %s\n", mode);
         if(strcmp(mode, "ss")==0) {
             handle_message(&messages, client_socket);
         } else if (strcmp(mode, "sm")==0) {
@@ -462,12 +465,11 @@ int main() {
             readReceivedMessage(messages, client_socket);
         } else if (strcmp(mode, "dm")==0) {
             deleteMessage(&messages, client_socket);
-        } else {
-            printf("Client disconnected.\n");
+        } else if (strcmp(mode, "ex")==0) {
+            goto retry;
         }
-
-    saveMessages(messages);
-}
+        saveMessages(messages);
+    }
     close(server_socket);
     return 0;
 }
