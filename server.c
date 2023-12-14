@@ -191,6 +191,7 @@ int checkCredentias(char *username, char *password) {
     }
     if (strcmp(user, username) == 0 && strcmp(pass, password) == 0)
         return 1;
+    
     goto start;
 }
 
@@ -394,7 +395,7 @@ void handle_createAccount(int socket_desc) {
                 send(socket_desc, "User created", strlen("User created"), 0);
                 int fd = open("credentials", O_RDWR | O_APPEND, 0644);
                 char buffer[1024];
-                snprintf(buffer, sizeof(buffer), "\n%s %s", username, password);
+                snprintf(buffer, sizeof(buffer), "%s %s\n", username, password);
                 write(fd, buffer, strlen(buffer));
                 close(fd);
                 strcpy(globalUser, username);
@@ -422,8 +423,7 @@ int main() {
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
     // Modifică adresa IP a serverului în codul clientului
-    server_addr.sin_addr.s_addr = inet_addr("192.168.222.116");
-
+    server_addr.sin_addr.s_addr = inet_addr("192.168.171.119");
 
     // Legare
     bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
@@ -466,6 +466,7 @@ int main() {
         } else if (strcmp(mode, "dm")==0) {
             deleteMessage(&messages, client_socket);
         } else if (strcmp(mode, "ex")==0) {
+            printf("Client exited.\n");
             goto retry;
         }
         saveMessages(messages);
