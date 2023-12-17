@@ -5,12 +5,15 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <time.h>
+#include <sodium.h>
 
 #define PORT 55555
 #define MAX_MESSAGE_SIZE 1024
 
 int indexCount = 0;
 char globalUser[100];
+unsigned char public_key[crypto_box_PUBLICKEYBYTES];
+unsigned char secret_key[crypto_box_SECRETKEYBYTES];
 
 // Structura unui nod din lista de vizibilitate a utilizatorilor
 struct Node {
@@ -195,7 +198,6 @@ int checkCredentias(char *username, char *password) {
     goto start;
 }
 
-
 void handle_client(int client_socket) {
     char buffer[MAX_MESSAGE_SIZE];
     int credentials_len;
@@ -207,7 +209,7 @@ void handle_client(int client_socket) {
             printf("Client disconnected.\n");
             break;
         }
-
+        
         buffer[credentials_len] = '\0'; // Adaugă terminatorul null pentru a trata datele primite ca șir
 
         // Separă mesajul în destinatar, titlu și conținut
@@ -423,7 +425,7 @@ int main() {
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
     // Modifică adresa IP a serverului în codul clientului
-    server_addr.sin_addr.s_addr = inet_addr("192.168.171.119");
+    server_addr.sin_addr.s_addr = inet_addr("192.168.222.116");
 
     // Legare
     bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
@@ -436,9 +438,11 @@ int main() {
 
     // Acceptare conexiune
     retry:
+    crypto_box_keypair(public_key, secret_key);
 
     client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &addr_len);
-
+    send(client_socket, public_key, strlen(public_key), 0);
+    send(client_socket, secret_key, strlen(secret_key), 0);
     printf("New connection accepted\n");
 
     // Manipulare client
@@ -448,8 +452,9 @@ int main() {
         handle_client(client_socket);
     } else if (strcmp(mode, "rg") == 0) {
         handle_createAccount(client_socket);
-    } else {
+    } else if (strcmp(mode, "ex") == 0) {
         printf("Client disconnected.\n");
+        goto retry;
     }
     int counter_while = 0;
 
@@ -467,9 +472,9 @@ int main() {
             deleteMessage(&messages, client_socket);
         } else if (strcmp(mode, "ex")==0) {
             printf("Client exited.\n");
+            saveMessages(messages);
             goto retry;
         }
-        saveMessages(messages);
     }
     close(server_socket);
     return 0;
