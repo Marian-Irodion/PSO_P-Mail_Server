@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <termios.h>
+#include <sodium.h>
 
 #define PORT 55555
 #define MAX_MESSAGE_SIZE 1024
@@ -13,6 +14,9 @@
 #define BLUE "\033[34m"
 #define RED_BOLD "\033[1;31m"
 #define YELLOW_BOLD "\033[1;33m"
+
+unsigned char public_key[crypto_box_SECRETKEYBYTES];
+unsigned char secret_key[crypto_box_SECRETKEYBYTES];
 
 // Funcție pentru activarea modului non-canonic
 void enableRawMode()
@@ -41,6 +45,37 @@ void print_title()
     printf("██║╚██╔╝██║░░░██║░░░██╔══██║░░░░░██║╚██╔╝██║██╔══██║██║██║░░░░░\n");
     printf("██║░╚═╝░██║░░░██║░░░██║░░██║░░░░░██║░╚═╝░██║██║░░██║██║███████╗\n");
     printf("╚═╝░░░░░╚═╝░░░╚═╝░░░╚═╝░░╚═╝░░░░░╚═╝░░░░░╚═╝╚═╝░░╚═╝╚═╝╚══════╝\n\n\n" WHITE);
+}
+
+void sendEncryptedMessage(int socket_desc, const unsigned char *encrypted_message, size_t message_length)
+{
+    // Trimite lungimea mesajului criptat la server
+    if (send(socket_desc, &message_length, sizeof(message_length), 0) < 0)
+    {
+        printf("Unable to send message length\n");
+        return;
+    }
+
+    // Așteaptă acknowledgement de la server
+    int acknowledgement;
+    if (recv(socket_desc, &acknowledgement, sizeof(acknowledgement), 0) < 0)
+    {
+        printf("Unable to receive acknowledgement\n");
+        return;
+    }
+
+    if (acknowledgement != 1)
+    {
+        printf("Server did not acknowledge message length\n");
+        return;
+    }
+
+    // Trimite mesajul criptat la server
+    if (send(socket_desc, encrypted_message, message_length, 0) < 0)
+    {
+        printf("Unable to send encrypted message\n");
+        return;
+    }
 }
 
 void login(int socket_desc)
@@ -96,7 +131,7 @@ try_login:
         return;
     }
 
-    if (strstr(server_response, "User authenticated") == NULL)
+    if (strcmp(server_response, "User not authenticated") == 0)
     {
         // login(socket_desc);
         printf(RED_BOLD "\nFailed to login, incorrect credentials!\n" WHITE);
@@ -325,6 +360,7 @@ void menu(int socket_desc)
         print_title();
         printf(YELLOW_BOLD "Saving data before we close out...\n" WHITE);
         sleep(3);
+        close(socket_desc);
         exit(0);
     default:
         printf(RED_BOLD "Invalid option\n" WHITE);
@@ -366,9 +402,12 @@ start:
     case '3':
         fflush(stdin);
         system("clear");
+        snprintf(mode, sizeof(mode), "%s", "ex\0");
+        send(socket_desc, mode, strlen(mode), 0);
         print_title();
         printf(YELLOW_BOLD "Saving data before we close out...\n" WHITE);
         sleep(3);
+        close(socket_desc);
         exit(0);
     default:
         printf(RED_BOLD "Invalid option\n" WHITE);
@@ -395,11 +434,10 @@ int main(void)
     }
 
     printf(GREEN_BOLD "Socket created successfully\n" WHITE);
-
     // Setare adresa serverului
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
-    server_addr.sin_addr.s_addr = inet_addr("192.168.171.119"); // Adresa IP a serverului
+    server_addr.sin_addr.s_addr = inet_addr("192.168.225.119"); // Adresa IP a serverului
 
     // Conectare la server
     if (connect(socket_desc, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
@@ -408,6 +446,9 @@ int main(void)
         return -1;
     }
     printf(GREEN_BOLD "Connected with server successfully\n" WHITE);
+
+    recv(socket_desc, public_key, sizeof(public_key), 0);
+    recv(socket_desc, secret_key, sizeof(secret_key), 0);
 
     // menu(socket_desc);
     system("clear");

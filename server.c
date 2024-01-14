@@ -131,7 +131,6 @@ struct Message
 struct Message *loadMessages()
 {
     int fd = open("messages", O_RDONLY);
-    // flock(fd, LOCK_EX);
     lseek(fd, 0, SEEK_SET);
     char buffer[16384];
     char character;
@@ -179,7 +178,6 @@ struct Message *loadMessages()
     indexCount++;
     messages = realloc(messages, (indexCount + 1) * sizeof(struct Message));
     goto start;
-    // flock(fd, LOCK_UN);
     close(fd);
 
     return messages;
@@ -189,7 +187,6 @@ struct Message *loadMessages()
 void saveMessages(struct Message *messages)
 {
     int fd = open("messages", O_RDWR | O_CREAT | O_TRUNC, 0644);
-    // flock(fd, LOCK_EX);
     for (int i = 0; i < indexCount; i++)
     {
         char buffer[8192];
@@ -197,7 +194,6 @@ void saveMessages(struct Message *messages)
         snprintf(buffer, sizeof(buffer), "%s %s %s %s\n%s%s^\n", messages[i].ID, messages[i].sender, messages[i].recipient, messages[i].title, allVisibileUsers, messages[i].message);
         write(fd, buffer, strlen(buffer));
     }
-    // flock(fd, LOCK_UN);
     close(fd);
 }
 
@@ -305,30 +301,9 @@ char *generateID()
     return ID;
 }
 
-// void writeToFileWithLock(const char *filename, struct Message **messages)
-// {
-//     int fd = open(filename, O_WRONLY, 0666);
-//     if (fd == -1)
-//     {
-//         perror("Error opening file.\n");
-//         return;
-//     }
-
-//     if (flock(fd, LOCK_EX) == -1)
-//     {
-//         perror("Error unlocking file.\n");
-//         close(fd);
-//         return;
-//     }
-
-//     flock(fd, LOCK_UN);
-//     close(fd);
-// }
-
 // functie care sa adauge o intrare in structura messages
 void addMessage(struct Message **messages, char *sender, char *recipient, char *title, char *message)
 {
-    // pthread_mutex_lock(&messages_mutex);
     strcpy((*messages)[indexCount].ID, generateID());
     strcpy((*messages)[indexCount].sender, sender);
     strcpy((*messages)[indexCount].recipient, recipient);
@@ -339,13 +314,10 @@ void addMessage(struct Message **messages, char *sender, char *recipient, char *
     addUser((*messages)[indexCount].visibilityList, recipient);
     indexCount++;
     *messages = realloc(*messages, (indexCount + 1) * sizeof(struct Message));
-    // writeToFileWithLock("messages", messages);
-    // pthread_mutex_unlock(&messages_mutex);
 }
 
 void handle_message(struct Message **messages, int client_socket)
 {
-    // pthread_mutex_lock(&messages_mutex);
     char buffer[MAX_MESSAGE_SIZE];
     int message_len;
 
@@ -380,17 +352,19 @@ void handle_message(struct Message **messages, int client_socket)
             printf("Invalid message format.\n");
         }
     }
-    // pthread_mutex_unlock(&messages_mutex);
-    //  close(client_socket);
+
+    // close(client_socket);
 }
 
 void readSentMessage(struct Message *messages, int socket_desc)
 {
-    // pthread_mutex_lock(&messages_mutex);
-
     for (int i = 0; i < indexCount; i++)
     {
         struct Node *current = messages[i].visibilityList->head;
+        if (current == NULL)
+        {
+            goto next;
+        }
         while (current != NULL)
         {
             if (strcmp(globalUser, current->username) == 0 && strcmp(globalUser, messages[i].sender) == 0)
@@ -402,16 +376,14 @@ void readSentMessage(struct Message *messages, int socket_desc)
             }
             current = current->next;
         }
+    next:
     }
     // Încheiere trimitere
-
     send(socket_desc, "^", strlen("^"), 0);
-    // thread_mutex_unlock(&messages_mutex);
 }
 
 void readReceivedMessage(struct Message *messages, int socket_desc)
 {
-    // pthread_mutex_lock(&messages_mutex);
     for (int i = 0; i < indexCount; i++)
     {
         if (messages[i].visibilityList == NULL)
@@ -420,11 +392,6 @@ void readReceivedMessage(struct Message *messages, int socket_desc)
             goto next;
         }
         struct Node *current = messages[i].visibilityList->head;
-        if (current == NULL)
-        {
-            printf("Warning: head of visibilityList is NULL for index %d\n", i);
-            goto next;
-        }
         while (current != NULL)
         {
             if (strcmp(globalUser, current->username) == 0 && strcmp(globalUser, messages[i].recipient) == 0)
@@ -439,9 +406,7 @@ void readReceivedMessage(struct Message *messages, int socket_desc)
     next:
     }
     // Încheiere trimitere
-
     send(socket_desc, "^", strlen("^"), 0);
-    // pthread_mutex_unlock(&messages_mutex);
 }
 
 void deleteMessage(struct Message **messages, int socket_desc)
@@ -450,7 +415,6 @@ void deleteMessage(struct Message **messages, int socket_desc)
     // in lista visibilityUsers a mesajului cu ID-ul primit de la client trebuie ca username-ul clientului sa fie inlocuit cu string-ul "null"
     // dupa asta, daca in lista visibilityUsers a mesajului cu ID-ul primit de la client nu mai exista niciun username diferit de "null", atunci mesajul trebuie sters din structura messages
     // si sa folosesti doar file descriptors si apeluri de sistem
-    // pthread_mutex_lock(&messages_mutex);
     char server_message[200];
     char ID[100];
     recv(socket_desc, ID, 100, 0);
@@ -493,8 +457,6 @@ void deleteMessage(struct Message **messages, int socket_desc)
         }
     }
     saveMessages(*messages);
-    // writeToFileWithLock("messages", messages);
-    // pthread_mutex_unlock(&messages_mutex);
 }
 
 void handle_createAccount(int socket_desc)
@@ -598,7 +560,7 @@ void *client_handler(void *arg)
             else if (strcmp(mode, "ex") == 0)
             {
                 printf("Client exited.\n");
-                //saveMessages(messages);
+                // saveMessages(messages);
                 ci->terminate = 1;
                 close(client_socket);
                 break;
@@ -640,7 +602,6 @@ int main()
 
     while (1)
     {
-
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
 
@@ -660,7 +621,7 @@ int main()
             pthread_t tid;
             if (pthread_create(&tid, NULL, client_handler, ci) != 0)
             {
-                perror("Failed to create thread for client");
+                perror("Failed to create thread for client.\n");
                 close(client_socket);
                 free(ci);
                 continue;
@@ -673,9 +634,8 @@ int main()
             send(client_socket, public_key, strlen(public_key), 0);
             send(client_socket, secret_key, strlen(secret_key), 0);
 
-            printf("Client %d connected.\n", thread_count);
+            printf("Client %d disconnected.\n", thread_count);
         }
-
         else
         {
             printf("Max client limit reached. Connection refused.\n");
