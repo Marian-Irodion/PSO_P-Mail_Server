@@ -5,15 +5,17 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <time.h>
-#include <sodium.h>
+#include "rsa.h"
 
 #define PORT 55555
 #define MAX_MESSAGE_SIZE 1024
 
+
 int indexCount = 0;
 char globalUser[100];
-unsigned char public_key[crypto_box_PUBLICKEYBYTES];
-unsigned char secret_key[crypto_box_SECRETKEYBYTES];
+
+struct public_key_class pub[1];
+struct private_key_class priv[1];
 
 // Structura unui nod din lista de vizibilitate a utilizatorilor
 struct Node {
@@ -31,6 +33,10 @@ struct visibilityUsers* createVisibilityUsers() {
     struct visibilityUsers* list = (struct visibilityUsers*)malloc(sizeof(struct visibilityUsers));
     list->head = NULL;
     return list;
+}
+
+void generate_rsa_keys() {
+    //TODO
 }
 
 // Funcție pentru a adăuga un utilizator în lista de vizibilitate a utilizatorilor
@@ -412,6 +418,25 @@ void handle_createAccount(int socket_desc) {
     //close(client_socket);
 }
 
+void send_public_key(int socket_desc) {
+    char modulus_str[20];  // Adjust the size based on your long long size
+    char exponent_str[20]; // Adjust the size based on your long long size
+
+    // Convert the long long values to strings
+    sprintf(modulus_str, "%lld", pub->modulus);
+    sprintf(exponent_str, "%lld", pub->exponent);
+
+    // Send the modulus
+    if (send(socket_desc, modulus_str, sizeof(modulus_str), 0) == -1) {
+        exit(1);
+    }
+
+    // Send the exponent
+    if (send(socket_desc, exponent_str, sizeof(exponent_str), 0) == -1) {
+        exit(1);
+    }
+}
+
 int main() {
     int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr;
@@ -425,7 +450,7 @@ int main() {
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
     // Modifică adresa IP a serverului în codul clientului
-    server_addr.sin_addr.s_addr = inet_addr("192.168.222.116");
+    server_addr.sin_addr.s_addr = inet_addr("192.168.199.116");
 
     // Legare
     bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
@@ -437,13 +462,11 @@ int main() {
     struct Message *messages = loadMessages();
 
     // Acceptare conexiune
-    retry:
-    crypto_box_keypair(public_key, secret_key);
-
+    new_client:
     client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &addr_len);
-    send(client_socket, public_key, strlen(public_key), 0);
-    send(client_socket, secret_key, strlen(secret_key), 0);
-    printf("New connection accepted\n");
+    rsa_gen_keys(pub, priv, PRIME_SOURCE_FILE);
+    send_public_key(client_socket);
+    retry:
 
     // Manipulare client
     char mode[100];
@@ -454,7 +477,7 @@ int main() {
         handle_createAccount(client_socket);
     } else if (strcmp(mode, "ex") == 0) {
         printf("Client disconnected.\n");
-        goto retry;
+        goto new_client;
     }
     int counter_while = 0;
 
@@ -473,7 +496,7 @@ int main() {
         } else if (strcmp(mode, "ex")==0) {
             printf("Client exited.\n");
             saveMessages(messages);
-            goto retry;
+            goto new_client;
         }
     }
     close(server_socket);
