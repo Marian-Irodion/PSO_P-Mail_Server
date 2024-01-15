@@ -13,15 +13,23 @@
 #define MAX_MESSAGE_SIZE 1024
 
 #define MAX_EVENTS 10
-#define MAX_THREADS 5
+#define MAX_THREADS 2
 
 int indexCount = 0;
 int thread_count = 0;
-char globalUser[100];
+// char globalUsers[2][100];
+int connectedUsers = 0;
 pthread_mutex_t messages_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t visibility_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 unsigned char public_key[crypto_box_PUBLICKEYBYTES];
 unsigned char secret_key[crypto_box_SECRETKEYBYTES];
+
+struct UserTids
+{
+    char username[100];
+    pthread_t tid;
+};
+struct UserTids globalUsers[2];
 
 // Structura unui nod din lista de vizibilitate a utilizatorilor
 struct Node
@@ -75,6 +83,13 @@ char *getAllVisibilityUsers(struct visibilityUsers *list)
 
     struct Node *current = list->head;
     char *result = malloc(sizeof(char) * 100); // dimensiunea este exemplificativă
+    if (result == NULL)
+    {
+        perror("Memory allocation error");
+        pthread_mutex_unlock(&visibility_list_mutex);
+        return NULL;
+    }
+
     memset(result, '\0', sizeof(result));
 
     while (current != NULL)
@@ -83,6 +98,7 @@ char *getAllVisibilityUsers(struct visibilityUsers *list)
         strcat(result, " ");
         current = current->next;
     }
+
     result[strlen(result) - 1] = '\n'; // Elimină ultimul spațiu din șirul rezultat
     pthread_mutex_unlock(&visibility_list_mutex);
 
@@ -209,12 +225,23 @@ void saveMessages(struct Message *messages)
     pthread_mutex_lock(&messages_mutex);
 
     int fd = open("messages", O_RDWR | O_CREAT | O_TRUNC, 0644);
+    char buffer[8096];
     for (int i = 0; i < indexCount; i++)
     {
-        char buffer[8192];
         char *allVisibileUsers = getAllVisibilityUsers(messages[i].visibilityList);
-        snprintf(buffer, sizeof(buffer), "%s %s %s %s\n%s%s^\n", messages[i].ID, messages[i].sender, messages[i].recipient, messages[i].title, allVisibileUsers, messages[i].message);
-        write(fd, buffer, strlen(buffer));
+        if (allVisibileUsers != NULL)
+        {
+            // snprintf(buffer, sizeof(buffer), "%s %s %s %s\n%s%s^\n", messages[i].ID, messages[i].sender, messages[i].recipient, messages[i].title, allVisibileUsers, messages[i].message);
+            // write(fd, buffer, strlen(buffer));
+            dprintf(fd, "%s %s %s %s\n%s%s^\n", messages[i].ID, messages[i].sender, messages[i].recipient, messages[i].title, allVisibileUsers, messages[i].message);
+            free(allVisibileUsers); // Eliberează memoria alocată pentru allVisibileUsers
+        }
+        else
+        {
+            perror("Error getting visibility users");
+        }
+
+        strncpy(buffer, " ", 3);
     }
     close(fd);
 
@@ -293,8 +320,10 @@ void handle_client(int client_socket)
             {
                 printf("User authenticated\n");
                 send(client_socket, "User authenticated", strlen("User authenticated"), 0);
-                strcpy(globalUser, username);
-                printf("\nUser connected: %s\n", globalUser);
+                strcpy(globalUsers[connectedUsers].username, username);
+                globalUsers[connectedUsers].tid = pthread_self();
+                connectedUsers++;
+                printf("\nUser connected: %s\n", globalUsers[connectedUsers - 1].username);
                 break;
             }
             else
@@ -345,7 +374,8 @@ void addMessage(struct Message **messages, char *sender, char *recipient, char *
     // strcpy((*messages)[indexCount].recipient, recipient);
     // strcpy((*messages)[indexCount].title, title);
     // strcpy((*messages)[indexCount].message, message);
-    struct Message *newMessage = &(*messages)[indexCount];
+    struct Message *newMessage = (struct Message *)malloc(sizeof(struct Message));
+    newMessage = &(*messages)[indexCount];
     if (indexCount < 0 || indexCount >= INT_MAX)
     {
         perror("IndexCount exceeds limits\n");
@@ -356,16 +386,16 @@ void addMessage(struct Message **messages, char *sender, char *recipient, char *
     snprintf(newMessage->ID, sizeof(newMessage->ID), "%s", generateID());
     newMessage->ID[strlen(newMessage->ID)] = '\0'; // Asigurați-vă că ID-ul este null-terminated
 
-    strncpy(newMessage->sender, sender, 100);
+    strncpy(newMessage->sender, sender, sizeof(newMessage->sender));
     newMessage->sender[strlen(newMessage->sender)] = '\0'; // Asigurați-vă că sender este null-terminated
 
-    strncpy(newMessage->recipient, recipient, 100);
+    strncpy(newMessage->recipient, recipient, sizeof(newMessage->recipient));
     newMessage->recipient[strlen(newMessage->recipient)] = '\0'; // Asigurați-vă că recipient este null-terminated
 
-    strncpy(newMessage->title, title, 100);
+    strncpy(newMessage->title, title, sizeof(newMessage->title));
     newMessage->title[strlen(newMessage->title)] = '\0'; // Asigurați-vă că title este null-terminated
 
-    strncpy(newMessage->message, message, 100);
+    strncpy(newMessage->message, message, sizeof(newMessage->message));
     newMessage->message[strlen(newMessage->message)] = '\0';
 
     newMessage->visibilityList = createVisibilityUsers();
@@ -414,10 +444,14 @@ void handle_message(struct Message **messages, int client_socket)
         {
             printf("Received message:\nRecipient: %s\nTitle: %s\nMessage: %s\n", recipient, title, message);
 
-            //pthread_mutex_lock(&messages_mutex);
-            addMessage(messages, globalUser, recipient, title, message);
-            saveMessages(*messages);
-            //pthread_mutex_unlock(&messages_mutex);
+            // pthread_mutex_lock(&messages_mutex);
+            if (globalUsers[0].tid == pthread_self())
+                addMessage(messages, globalUsers[0].username, recipient, title, message);
+            else
+                addMessage(messages, globalUsers[1].username, recipient, title, message);
+
+            // saveMessages(*messages);
+            //  pthread_mutex_unlock(&messages_mutex);
             break;
             // Aici poți adăuga logica pentru a trata mesajul cum dorești
             // De exemplu, poți trimite un răspuns înapoi clientului sau poți face altceva cu mesajul primit
@@ -435,6 +469,13 @@ void readSentMessage(struct Message *messages, int socket_desc)
 {
     pthread_mutex_lock(&messages_mutex);
 
+    char currentUser[100];
+
+    if (globalUsers[0].tid == pthread_self())
+        strcpy(currentUser, globalUsers[0].username);
+    else
+        strcpy(currentUser, globalUsers[1].username);
+
     for (int i = 0; i < indexCount; i++)
     {
         if (messages[i].visibilityList == NULL)
@@ -447,7 +488,7 @@ void readSentMessage(struct Message *messages, int socket_desc)
 
         while (current != NULL)
         {
-            if (strcmp(globalUser, current->username) == 0 && strcmp(globalUser, messages[i].sender) == 0)
+            if (strcmp(currentUser, current->username) == 0 && strcmp(currentUser, messages[i].sender) == 0)
             {
                 char buffer[MAX_MESSAGE_SIZE];
                 snprintf(buffer, sizeof(buffer), "ID: %s\nCatre: %s\nTitlul: %s\nContinut: %s\n\n", messages[i].ID, messages[i].recipient, messages[i].title, messages[i].message);
@@ -470,6 +511,13 @@ void readReceivedMessage(struct Message *messages, int socket_desc)
 {
     pthread_mutex_lock(&messages_mutex);
 
+    char currentUser[100];
+
+    if (globalUsers[0].tid == pthread_self())
+        strcpy(currentUser, globalUsers[0].username);
+    else
+        strcpy(currentUser, globalUsers[1].username);
+
     for (int i = 0; i < indexCount; i++)
     {
         if (messages[i].visibilityList == NULL)
@@ -480,7 +528,7 @@ void readReceivedMessage(struct Message *messages, int socket_desc)
         struct Node *current = messages[i].visibilityList->head;
         while (current != NULL)
         {
-            if (strcmp(globalUser, current->username) == 0 && strcmp(globalUser, messages[i].recipient) == 0)
+            if (strcmp(currentUser, current->username) == 0 && strcmp(currentUser, messages[i].recipient) == 0)
             {
                 char buffer[MAX_MESSAGE_SIZE];
                 snprintf(buffer, sizeof(buffer), "ID: %s\nDe la: %s\nTitlul: %s\nContinut: %s\n\n", messages[i].ID, messages[i].sender, messages[i].title, messages[i].message);
@@ -519,6 +567,13 @@ void deleteMessage(struct Message **messages, int socket_desc)
 
     pthread_mutex_lock(&messages_mutex);
 
+    char currentUser[100];
+
+    if (globalUsers[0].tid == pthread_self())
+        strcpy(currentUser, globalUsers[0].username);
+    else
+        strcpy(currentUser, globalUsers[1].username);
+
     for (int i = 0; i < indexCount; i++)
     {
         if (strcmp(ID, (*messages)[i].ID) == 0)
@@ -526,7 +581,7 @@ void deleteMessage(struct Message **messages, int socket_desc)
             struct Node *current = (*messages)[i].visibilityList->head;
             while (current != NULL)
             {
-                if (strcmp(current->username, globalUser) == 0)
+                if (strcmp(current->username, currentUser) == 0)
                 {
                     strncpy(current->username, "null", strlen("null"));
                 }
@@ -558,7 +613,7 @@ void deleteMessage(struct Message **messages, int socket_desc)
     }
 
     pthread_mutex_unlock(&messages_mutex);
-    saveMessages(*messages);
+    // saveMessages(*messages);
 }
 
 void handle_createAccount(int socket_desc)
@@ -599,8 +654,10 @@ void handle_createAccount(int socket_desc)
                 snprintf(buffer, sizeof(buffer), "%s %s\n", username, password);
                 write(fd, buffer, strlen(buffer));
                 close(fd);
-                strncpy(globalUser, username, strlen(username));
-                printf("\nUser connected: %s\n", globalUser);
+                strncpy(globalUsers[connectedUsers].username, username, strlen(username));
+                globalUsers[connectedUsers].tid = pthread_self();
+                connectedUsers++;
+                printf("\nUser connected: %s\n", globalUsers[connectedUsers - 1].username);
                 break;
             }
         }
@@ -636,6 +693,19 @@ void *client_handler(void *arg)
             printf("Client disconnected.\n");
             ci->terminate = 1;
             close(client_socket);
+            if (globalUsers[0].tid == pthread_self())
+            {
+                globalUsers[0].tid = globalUsers[1].tid;
+                strcpy(globalUsers[0].username, globalUsers[1].username);
+                globalUsers[1].tid = NULL;
+                strcpy(globalUsers[1].username, "");
+            }
+            else
+            {
+                globalUsers[1].tid = NULL;
+                strcpy(globalUsers[1].username, "");
+            }
+            connectedUsers--;
             break;
         }
 
@@ -646,6 +716,7 @@ void *client_handler(void *arg)
             if (strcmp(mode, "ss") == 0)
             {
                 handle_message(&messages, client_socket);
+                saveMessages(messages);
             }
             else if (strcmp(mode, "sm") == 0)
             {
@@ -658,6 +729,7 @@ void *client_handler(void *arg)
             else if (strcmp(mode, "dm") == 0)
             {
                 deleteMessage(&messages, client_socket);
+                saveMessages(messages);
             }
             else if (strcmp(mode, "ex") == 0)
             {
@@ -665,6 +737,19 @@ void *client_handler(void *arg)
                 // saveMessages(messages);
                 ci->terminate = 1;
                 close(client_socket);
+                if (globalUsers[0].tid == pthread_self())
+                {
+                    globalUsers[0].tid = globalUsers[1].tid;
+                    strcpy(globalUsers[0].username, globalUsers[1].username);
+                    globalUsers[1].tid = NULL;
+                    strcpy(globalUsers[1].username, "");
+                }
+                else
+                {
+                    globalUsers[1].tid = NULL;
+                    strcpy(globalUsers[1].username, "");
+                }
+                connectedUsers--;
                 break;
             }
         }
