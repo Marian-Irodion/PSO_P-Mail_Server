@@ -4,7 +4,7 @@ client: client.c
 	gcc $^ -o $@
 
 server: server.c
-	gcc $^ -o $@ -lsodium
+	gcc $^ -o $@ -lsodium -lpthread
 
 clean:
 	rm -r server client

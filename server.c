@@ -19,6 +19,7 @@ int indexCount = 0;
 int thread_count = 0;
 char globalUser[100];
 pthread_mutex_t messages_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t visibility_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 unsigned char public_key[crypto_box_PUBLICKEYBYTES];
 unsigned char secret_key[crypto_box_SECRETKEYBYTES];
 
@@ -44,24 +45,34 @@ typedef struct
 // Funcție pentru a inițializa o listă nouă de vizibilitate a utilizatorilor
 struct visibilityUsers *createVisibilityUsers()
 {
+    pthread_mutex_lock(&visibility_list_mutex);
+
     struct visibilityUsers *list = (struct visibilityUsers *)malloc(sizeof(struct visibilityUsers));
     list->head = NULL;
+
+    pthread_mutex_unlock(&visibility_list_mutex);
     return list;
 }
 
 // Funcție pentru a adăuga un utilizator în lista de vizibilitate a utilizatorilor
 void addUser(struct visibilityUsers *list, const char *username)
 {
+    pthread_mutex_lock(&visibility_list_mutex);
+
     struct Node *newNode = (struct Node *)malloc(sizeof(struct Node));
     strncpy(newNode->username, username, sizeof(newNode->username) - 1);
     newNode->username[sizeof(newNode->username) - 1] = '\0';
     newNode->next = list->head;
     list->head = newNode;
+
+    pthread_mutex_unlock(&visibility_list_mutex);
 }
 
 // Funcție pentru a obține toate string-urile din lista de vizibilitate
 char *getAllVisibilityUsers(struct visibilityUsers *list)
 {
+    pthread_mutex_lock(&visibility_list_mutex);
+
     struct Node *current = list->head;
     char *result = malloc(sizeof(char) * 100); // dimensiunea este exemplificativă
     memset(result, '\0', sizeof(result));
@@ -73,6 +84,8 @@ char *getAllVisibilityUsers(struct visibilityUsers *list)
         current = current->next;
     }
     result[strlen(result) - 1] = '\n'; // Elimină ultimul spațiu din șirul rezultat
+    pthread_mutex_unlock(&visibility_list_mutex);
+
     return result;
 }
 
@@ -130,13 +143,16 @@ struct Message
 
 struct Message *loadMessages()
 {
+    pthread_mutex_lock(&messages_mutex);
+
     int fd = open("messages", O_RDONLY);
     lseek(fd, 0, SEEK_SET);
     char buffer[16384];
     char character;
     int bufPos = 0;
     int bytesRead;
-    struct Message *messages = malloc(sizeof(struct Message));
+
+    struct Message *messages = (struct Message *)malloc((indexCount + 1) * sizeof(struct Message));
     while (1)
     {
     start:
@@ -157,6 +173,8 @@ struct Message *loadMessages()
         }
         else
         {
+            close(fd);
+            pthread_mutex_unlock(&messages_mutex);
             return messages;
         }
     }
@@ -167,18 +185,20 @@ struct Message *loadMessages()
     char *firstUser = strtok(NULL, " ");
     char *secondUser = strtok(NULL, "\n");
     char *message = strtok(NULL, "^");
-    strcpy(messages[indexCount].ID, ID);
-    strcpy(messages[indexCount].sender, sender);
-    strcpy(messages[indexCount].recipient, recipient);
-    strcpy(messages[indexCount].title, title);
-    strcpy(messages[indexCount].message, message);
+    strncpy(messages[indexCount].ID, ID, strlen(ID));
+    strncpy(messages[indexCount].sender, sender, strlen(sender));
+    strncpy(messages[indexCount].recipient, recipient, strlen(recipient));
+    strncpy(messages[indexCount].title, title, strlen(title));
+    strncpy(messages[indexCount].message, message, strlen(message));
     messages[indexCount].visibilityList = createVisibilityUsers();
     addUser(messages[indexCount].visibilityList, firstUser);
     addUser(messages[indexCount].visibilityList, secondUser);
     indexCount++;
     messages = realloc(messages, (indexCount + 1) * sizeof(struct Message));
     goto start;
+
     close(fd);
+    pthread_mutex_unlock(&messages_mutex);
 
     return messages;
 }
@@ -186,6 +206,8 @@ struct Message *loadMessages()
 // o functie care scrie ce tot ce este in structura Message intr-un fisier messages
 void saveMessages(struct Message *messages)
 {
+    pthread_mutex_lock(&messages_mutex);
+
     int fd = open("messages", O_RDWR | O_CREAT | O_TRUNC, 0644);
     for (int i = 0; i < indexCount; i++)
     {
@@ -195,6 +217,8 @@ void saveMessages(struct Message *messages)
         write(fd, buffer, strlen(buffer));
     }
     close(fd);
+
+    pthread_mutex_unlock(&messages_mutex);
 }
 
 // o functie implementata pe server care sa caute in fisierul credentials.txt daca exista username-ul si parola introduse de utilizator
@@ -304,16 +328,60 @@ char *generateID()
 // functie care sa adauge o intrare in structura messages
 void addMessage(struct Message **messages, char *sender, char *recipient, char *title, char *message)
 {
-    strcpy((*messages)[indexCount].ID, generateID());
-    strcpy((*messages)[indexCount].sender, sender);
-    strcpy((*messages)[indexCount].recipient, recipient);
-    strcpy((*messages)[indexCount].title, title);
-    strcpy((*messages)[indexCount].message, message);
-    (*messages)[indexCount].visibilityList = createVisibilityUsers();
-    addUser((*messages)[indexCount].visibilityList, sender);
-    addUser((*messages)[indexCount].visibilityList, recipient);
-    indexCount++;
+    pthread_mutex_lock(&messages_mutex);
+
     *messages = realloc(*messages, (indexCount + 1) * sizeof(struct Message));
+
+    // Verificați dacă realocarea a avut succes
+    if (*messages == NULL)
+    {
+        perror("Realloc failed\n");
+        pthread_mutex_unlock(&messages_mutex);
+        return;
+    }
+
+    // strcpy((*messages)[indexCount].ID, generateID());
+    // strcpy((*messages)[indexCount].sender, sender);
+    // strcpy((*messages)[indexCount].recipient, recipient);
+    // strcpy((*messages)[indexCount].title, title);
+    // strcpy((*messages)[indexCount].message, message);
+    struct Message *newMessage = &(*messages)[indexCount];
+    if (indexCount < 0 || indexCount >= INT_MAX)
+    {
+        perror("IndexCount exceeds limits\n");
+        pthread_mutex_unlock(&messages_mutex);
+        return;
+    }
+
+    snprintf(newMessage->ID, sizeof(newMessage->ID), "%s", generateID());
+    newMessage->ID[strlen(newMessage->ID)] = '\0'; // Asigurați-vă că ID-ul este null-terminated
+
+    strncpy(newMessage->sender, sender, 100);
+    newMessage->sender[strlen(newMessage->sender)] = '\0'; // Asigurați-vă că sender este null-terminated
+
+    strncpy(newMessage->recipient, recipient, 100);
+    newMessage->recipient[strlen(newMessage->recipient)] = '\0'; // Asigurați-vă că recipient este null-terminated
+
+    strncpy(newMessage->title, title, 100);
+    newMessage->title[strlen(newMessage->title)] = '\0'; // Asigurați-vă că title este null-terminated
+
+    strncpy(newMessage->message, message, 100);
+    newMessage->message[strlen(newMessage->message)] = '\0';
+
+    newMessage->visibilityList = createVisibilityUsers();
+    if (newMessage->visibilityList == NULL)
+    {
+        perror("Failed to create visibility list\n");
+        pthread_mutex_unlock(&messages_mutex);
+        return;
+    }
+
+    addUser(newMessage->visibilityList, sender);
+    addUser(newMessage->visibilityList, recipient);
+
+    indexCount++;
+
+    pthread_mutex_unlock(&messages_mutex);
 }
 
 void handle_message(struct Message **messages, int client_socket)
@@ -323,7 +391,11 @@ void handle_message(struct Message **messages, int client_socket)
 
     while (1)
     {
+        pthread_mutex_lock(&messages_mutex);
+
         message_len = recv(client_socket, buffer, MAX_MESSAGE_SIZE, 0);
+
+        pthread_mutex_unlock(&messages_mutex);
 
         if (message_len <= 0)
         {
@@ -341,8 +413,11 @@ void handle_message(struct Message **messages, int client_socket)
         if (recipient != NULL && title != NULL && message != NULL)
         {
             printf("Received message:\nRecipient: %s\nTitle: %s\nMessage: %s\n", recipient, title, message);
+
+            //pthread_mutex_lock(&messages_mutex);
             addMessage(messages, globalUser, recipient, title, message);
             saveMessages(*messages);
+            //pthread_mutex_unlock(&messages_mutex);
             break;
             // Aici poți adăuga logica pentru a trata mesajul cum dorești
             // De exemplu, poți trimite un răspuns înapoi clientului sau poți face altceva cu mesajul primit
@@ -358,53 +433,68 @@ void handle_message(struct Message **messages, int client_socket)
 
 void readSentMessage(struct Message *messages, int socket_desc)
 {
+    pthread_mutex_lock(&messages_mutex);
+
     for (int i = 0; i < indexCount; i++)
     {
-        struct Node *current = messages[i].visibilityList->head;
-        if (current == NULL)
+        if (messages[i].visibilityList == NULL)
         {
-            goto next;
+            printf("Error: visibilityList is NULL for index %d\n", i);
+            continue;
         }
+
+        struct Node *current = messages[i].visibilityList->head;
+
         while (current != NULL)
         {
             if (strcmp(globalUser, current->username) == 0 && strcmp(globalUser, messages[i].sender) == 0)
             {
-                char buffer[4096];
+                char buffer[MAX_MESSAGE_SIZE];
                 snprintf(buffer, sizeof(buffer), "ID: %s\nCatre: %s\nTitlul: %s\nContinut: %s\n\n", messages[i].ID, messages[i].recipient, messages[i].title, messages[i].message);
                 send(socket_desc, buffer, strlen(buffer), 0);
+
+                // pthread_mutex_unlock(&messages_mutex);
+                // send(socket_desc, "^", strlen("^"), 0);
                 break; // În momentul în care găsim utilizatorul în lista de vizibilitate, trimitem mesajul și ieșim din buclă
             }
             current = current->next;
         }
-    next:
     }
+
+    pthread_mutex_unlock(&messages_mutex);
     // Încheiere trimitere
     send(socket_desc, "^", strlen("^"), 0);
 }
 
 void readReceivedMessage(struct Message *messages, int socket_desc)
 {
+    pthread_mutex_lock(&messages_mutex);
+
     for (int i = 0; i < indexCount; i++)
     {
         if (messages[i].visibilityList == NULL)
         {
             printf("Error: visibilityList is NULL for index %d\n", i);
-            goto next;
+            continue;
         }
         struct Node *current = messages[i].visibilityList->head;
         while (current != NULL)
         {
             if (strcmp(globalUser, current->username) == 0 && strcmp(globalUser, messages[i].recipient) == 0)
             {
-                char buffer[4096];
+                char buffer[MAX_MESSAGE_SIZE];
                 snprintf(buffer, sizeof(buffer), "ID: %s\nDe la: %s\nTitlul: %s\nContinut: %s\n\n", messages[i].ID, messages[i].sender, messages[i].title, messages[i].message);
                 send(socket_desc, buffer, strlen(buffer), 0);
+
+                // pthread_mutex_unlock(&messages_mutex);
+                // send(socket_desc, "^", strlen("^"), 0);
                 break; // Ieșire din buclă când utilizatorul este găsit în lista de vizibilitate
             }
             current = current->next;
         }
-    next:
     }
+
+    pthread_mutex_unlock(&messages_mutex);
     // Încheiere trimitere
     send(socket_desc, "^", strlen("^"), 0);
 }
@@ -416,10 +506,19 @@ void deleteMessage(struct Message **messages, int socket_desc)
     // dupa asta, daca in lista visibilityUsers a mesajului cu ID-ul primit de la client nu mai exista niciun username diferit de "null", atunci mesajul trebuie sters din structura messages
     // si sa folosesti doar file descriptors si apeluri de sistem
     char server_message[200];
-    char ID[100];
-    recv(socket_desc, ID, 100, 0);
+    char ID[14];
+    ssize_t bytesRead = recv(socket_desc, ID, sizeof(ID) - 1, 0);
+    if (bytesRead <= 0)
+    {
+        close(socket_desc);
+        return;
+    }
+
     printf("ID primit: %s\n", ID);
-    ID[13] = '\0';
+    ID[bytesRead] = '\0';
+
+    pthread_mutex_lock(&messages_mutex);
+
     for (int i = 0; i < indexCount; i++)
     {
         if (strcmp(ID, (*messages)[i].ID) == 0)
@@ -429,7 +528,7 @@ void deleteMessage(struct Message **messages, int socket_desc)
             {
                 if (strcmp(current->username, globalUser) == 0)
                 {
-                    strcpy(current->username, "null");
+                    strncpy(current->username, "null", strlen("null"));
                 }
                 current = current->next;
             }
@@ -439,23 +538,26 @@ void deleteMessage(struct Message **messages, int socket_desc)
             {
                 if (strcmp(aux->username, "null") != 0)
                 {
+                    pthread_mutex_unlock(&messages_mutex);
                     return;
                 }
                 aux = aux->next;
             }
 
-            if (aux == NULL)
+            close(socket_desc);
+            for (int j = i; j < indexCount - 1; j++)
             {
-                for (int j = i; j < indexCount - 1; j++)
-                {
-                    messages[j] = messages[j + 1];
-                }
-                indexCount--;
-                messages = realloc(messages, (indexCount + 1) * sizeof(struct Message));
+                (*messages[j]) = (*messages)[j + 1];
             }
+
+            indexCount--;
+            *messages = realloc(*messages, indexCount * sizeof(struct Message));
+
             break;
         }
     }
+
+    pthread_mutex_unlock(&messages_mutex);
     saveMessages(*messages);
 }
 
@@ -497,7 +599,7 @@ void handle_createAccount(int socket_desc)
                 snprintf(buffer, sizeof(buffer), "%s %s\n", username, password);
                 write(fd, buffer, strlen(buffer));
                 close(fd);
-                strcpy(globalUser, username);
+                strncpy(globalUser, username, strlen(username));
                 printf("\nUser connected: %s\n", globalUser);
                 break;
             }
@@ -634,7 +736,7 @@ int main()
             send(client_socket, public_key, strlen(public_key), 0);
             send(client_socket, secret_key, strlen(secret_key), 0);
 
-            printf("Client %d disconnected.\n", thread_count);
+            printf("Client %d connected.\n", thread_count);
         }
         else
         {
