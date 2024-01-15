@@ -17,7 +17,8 @@
 
 struct public_key_class pub[1];
 
-void receive_public_key(int socket_desc) {
+void receive_public_key(int socket_desc) 
+{
     char modulus_str[20];  // Adjust the size based on your long long size
     char exponent_str[20]; // Adjust the size based on your long long size
 
@@ -63,6 +64,37 @@ void print_title()
     printf("██║╚██╔╝██║░░░██║░░░██╔══██║░░░░░██║╚██╔╝██║██╔══██║██║██║░░░░░\n");
     printf("██║░╚═╝░██║░░░██║░░░██║░░██║░░░░░██║░╚═╝░██║██║░░██║██║███████╗\n");
     printf("╚═╝░░░░░╚═╝░░░╚═╝░░░╚═╝░░╚═╝░░░░░╚═╝░░░░░╚═╝╚═╝░░╚═╝╚═╝╚══════╝\n\n\n" WHITE);
+}
+
+void sendEncryptedMessage(int socket_desc, const unsigned char *encrypted_message, size_t message_length)
+{
+    // Trimite lungimea mesajului criptat la server
+    if (send(socket_desc, &message_length, sizeof(message_length), 0) < 0)
+    {
+        printf("Unable to send message length\n");
+        return;
+    }
+
+    // Așteaptă acknowledgement de la server
+    int acknowledgement;
+    if (recv(socket_desc, &acknowledgement, sizeof(acknowledgement), 0) < 0)
+    {
+        printf("Unable to receive acknowledgement\n");
+        return;
+    }
+
+    if (acknowledgement != 1)
+    {
+        printf("Server did not acknowledge message length\n");
+        return;
+    }
+
+    // Trimite mesajul criptat la server
+    if (send(socket_desc, encrypted_message, message_length, 0) < 0)
+    {
+        printf("Unable to send encrypted message\n");
+        return;
+    }
 }
 
 void login(int socket_desc)
@@ -138,7 +170,8 @@ try_login:
 
 void sendMessage(int socket_desc)
 {
-    char server_message[200], client_message[200];
+
+    char server_message[MAX_MESSAGE_SIZE + 200], client_message[MAX_MESSAGE_SIZE];
     char recipient[100], title[100];
     char trash[2];
     fgets(trash, sizeof(trash), stdin);
@@ -423,7 +456,7 @@ int main(void)
     // Setare adresa serverului
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
-    server_addr.sin_addr.s_addr = inet_addr("192.168.199.116"); // Adresa IP a serverului
+    server_addr.sin_addr.s_addr = inet_addr("192.168.225.119"); // Adresa IP a serverului
 
     // Conectare la server
     if (connect(socket_desc, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
