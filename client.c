@@ -4,7 +4,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <termios.h>
-#include <sodium.h>
+#include "rsa.h"
 
 #define PORT 55555
 #define MAX_MESSAGE_SIZE 1024
@@ -15,8 +15,27 @@
 #define RED_BOLD "\033[1;31m"
 #define YELLOW_BOLD "\033[1;33m"
 
-unsigned char public_key[crypto_box_SECRETKEYBYTES];
-unsigned char secret_key[crypto_box_SECRETKEYBYTES];
+struct public_key_class pub[1];
+
+void receive_public_key(int socket_desc) 
+{
+    char modulus_str[20];  // Adjust the size based on your long long size
+    char exponent_str[20]; // Adjust the size based on your long long size
+
+    // Receive the modulus
+    if (recv(socket_desc, modulus_str, sizeof(modulus_str), 0) == -1) {
+        exit(1);
+    }
+
+    // Receive the exponent
+    if (recv(socket_desc, exponent_str, sizeof(exponent_str), 0) == -1) {
+       exit(1);
+    }
+
+    // Convert the received strings back to long long
+    sscanf(modulus_str, "%lld", &pub->modulus);
+    sscanf(exponent_str, "%lld", &pub->exponent);
+}
 
 // Funcție pentru activarea modului non-canonic
 void enableRawMode()
@@ -447,11 +466,9 @@ int main(void)
     }
     printf(GREEN_BOLD "Connected with server successfully\n" WHITE);
 
-    recv(socket_desc, public_key, sizeof(public_key), 0);
-    recv(socket_desc, secret_key, sizeof(secret_key), 0);
-
     // menu(socket_desc);
     system("clear");
+    receive_public_key(socket_desc);
     print_title();
     antemenu(socket_desc);
     system("clear");
